@@ -1,7 +1,35 @@
-      - name: Create RDP User with Fixed Password
+name: RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Configure RDP
+        shell: powershell
         run: |
-          $password = "123568"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1
+
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+          Restart-Service -Name TermService -Force
+
+      - name: Create RDP User
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
+              throw "Set RDP_PASSWORD in GitHub repository secrets."
+          }
+
+          $securePass = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
 
           $existingUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
 
@@ -14,6 +42,58 @@
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
 
-          "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
+          Write-Host "RDP user created successfully."
 
-          Write-Host "RDP user configured successfully."
+      - name: Install Tailscale
+        shell: powershell
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi"
+          $installer = "$env:TEMP\tailscale.msi"
+
+          Invoke-WebRequest -Uri $url -OutFile $installer
+
+          Start-Process msiexec.exe -ArgumentList "/i `"$installer`" /quiet /norestart" -Wait
+
+          Remove-Item $installer -Force
+
+      - name: Connect Tailscale
+        shell: powershell
+        env:
+          TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TS_AUTHKEY)) {
+              throw "TAILSCALE_AUTH_KEY secret is missing."
+          }
+
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          Start-Service -Name Tailscale
+
+          & $ts up --authkey="$env:TS_AUTHKEY" --hostname="gh-runner-$env:GITHUB_RUN_ID"
+
+          Start-Sleep -Seconds 10
+
+          $ip = & $ts ip -4
+
+          if (-not $ip) {
+              throw "Tailscale IP was not assigned."
+          }
+
+          "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+
+      - name: Display Connection Information
+        shell: powershell
+        run: |
+          Write-Host "================================"
+          Write-Host "RDP ADDRESS: $env:TAILSCALE_IP"
+          Write-Host "USERNAME: RDP"
+          Write-Host "PASSWORD: Configure using RDP_PASSWORD secret"
+          Write-Host "================================"
+
+      - name: Keep Runner Active
+        shell: powershell
+        run: |
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP Runner Active"
+              Start-Sleep -Seconds 300
+          }
