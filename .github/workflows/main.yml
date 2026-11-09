@@ -23,7 +23,7 @@ jobs:
       - name: Create RDP User
         shell: powershell
         run: |
-          $password = "123568"
+          $password = "core_2_quad"
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           $existingUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
@@ -104,7 +104,7 @@ jobs:
           Write-Host "=============================="
           Write-Host "RDP ADDRESS: $env:TAILSCALE_IP"
           Write-Host "USERNAME: RDP"
-          Write-Host "PASSWORD: 123568"
+          Write-Host "PASSWORD: core_2_quad"
           Write-Host "=============================="
 
       - name: Keep Runner Active
