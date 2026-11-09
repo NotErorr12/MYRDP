@@ -22,27 +22,30 @@ jobs:
 
       - name: Create RDP User
         shell: powershell
-        env:
-          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) {
-              throw "Set RDP_PASSWORD in GitHub repository secrets."
-          }
-
-          $securePass = ConvertTo-SecureString $env:RDP_PASSWORD -AsPlainText -Force
+          $password = "123568"
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
           $existingUser = Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue
 
           if ($existingUser) {
               Set-LocalUser -Name "RDP" -Password $securePass
-          } else {
+          }
+          else {
               New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           }
 
-          Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP" -ErrorAction SilentlyContinue
+          $groups = @("Administrators", "Remote Desktop Users")
 
-          Write-Host "RDP user created successfully."
+          foreach ($group in $groups) {
+              $members = Get-LocalGroupMember -Group $group -ErrorAction SilentlyContinue
+
+              if (-not ($members | Where-Object { $_.Name -match '\\RDP$' })) {
+                  Add-LocalGroupMember -Group $group -Member "RDP"
+              }
+          }
+
+          Write-Host "RDP user configured successfully."
 
       - name: Install Tailscale
         shell: powershell
@@ -81,14 +84,28 @@ jobs:
 
           "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
 
-      - name: Display Connection Information
+      - name: Verify RDP
         shell: powershell
         run: |
-          Write-Host "================================"
+          Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+
+          $result = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 3389
+
+          if (-not $result.TcpTestSucceeded) {
+              Write-Host "RDP port is not reachable yet."
+          }
+          else {
+              Write-Host "RDP port is reachable."
+          }
+
+      - name: Display RDP Information
+        shell: powershell
+        run: |
+          Write-Host "=============================="
           Write-Host "RDP ADDRESS: $env:TAILSCALE_IP"
           Write-Host "USERNAME: RDP"
-          Write-Host "PASSWORD: Configure using RDP_PASSWORD secret"
-          Write-Host "================================"
+          Write-Host "PASSWORD: 123568"
+          Write-Host "=============================="
 
       - name: Keep Runner Active
         shell: powershell
